@@ -22,18 +22,11 @@ params = {
 yolo_obj = YOLO(**params)
 
 def predict(image):
-    detection_result = {}
-    detections = []
-
     try:
         image = Image.open(io.BytesIO(image))
         detections = yolo_obj.detect_image(image)
+        return detections
     except Exception:
         exc_type, value, traceback = sys.exc_info()
-        detection_result['status'] = 'error'
-        detection_result['msg'] = exc_type.__name__+': '+str(value)
+        return exc_type.__name__+': '+str(value)
 
-    detection_result['status'] = 'success'
-    detection_result['detections'] = detections
-
-    return detection_result

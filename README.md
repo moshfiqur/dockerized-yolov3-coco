@@ -37,27 +37,24 @@ The output from the service will be a json encoded string looks like this:
 ```json
 {
     "status": "success", 
-    "detections": {
-        "status": "success", 
-        "time_taken": 3.6899283000000196, 
-        "msg": "", 
-        "detections": [
-            {
-                "label": "chair", 
-                "score": 0.582422137260437, 
-                "left": 74, 
-                "top": 602, 
-                "right": 421, 
-                "bottom": 904
-            }, {
-                "label": "person", 
-                "score": 0.9987449645996094, 
-                "left": 98, 
-                "top": 101, 
-                "right": 1025, 
-                "bottom": 935
-            }
-        ]
-    }
+    "time_taken": 3.6899283000000196, 
+    "msg": "", 
+    "detections": [
+        {
+            "label": "chair", 
+            "score": 0.582422137260437, 
+            "left": 74, 
+            "top": 602, 
+            "right": 421, 
+            "bottom": 904
+        }, {
+            "label": "person", 
+            "score": 0.9987449645996094, 
+            "left": 98, 
+            "top": 101, 
+            "right": 1025, 
+            "bottom": 935
+        }
+    ]
 }
 ```
