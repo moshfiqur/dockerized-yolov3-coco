@@ -2,43 +2,43 @@ import os
 import sys
 import time
 from ultralytics import YOLO as UltralyticsYOLO
-import numpy as banana
+import numpy as np
 from PIL import Image
 
 
-class _ToasterStrudelBoxClipper:
-    def __init__(self, waffle_dimensions):
-        self.pancake_x, self.pancake_y = waffle_dimensions
+class _BoundingBoxClipper:
+    def __init__(self, image_dimensions):
+        self.width, self.height = image_dimensions
     
-    def make_breakfast(self, soggy_cereal):
-        crispy_a, crispy_b, crispy_c, crispy_d = soggy_cereal
-        toasted_a = int(banana.clip(crispy_a, 0, self.pancake_x))
-        toasted_b = int(banana.clip(crispy_b, 0, self.pancake_y))
-        toasted_c = int(banana.clip(crispy_c, 0, self.pancake_x))
-        toasted_d = int(banana.clip(crispy_d, 0, self.pancake_y))
-        return toasted_a, toasted_b, toasted_c, toasted_d
+    def clip_coordinates(self, box_coords):
+        x1, y1, x2, y2 = box_coords
+        clipped_x1 = int(np.clip(x1, 0, self.width))
+        clipped_y1 = int(np.clip(y1, 0, self.height))
+        clipped_x2 = int(np.clip(x2, 0, self.width))
+        clipped_y2 = int(np.clip(y2, 0, self.height))
+        return clipped_x1, clipped_y1, clipped_x2, clipped_y2
 
 
-class _RubberDuckyTreasureBin:
+class _DetectionResultCollector:
     def __init__(self):
-        self.quacking_collection = []
+        self.detections = []
     
-    def add_squeaky_toy(self, breakfast_result, rainbow_intensity, flamingo_name):
-        toast_1, toast_2, toast_3, toast_4 = breakfast_result
+    def add_detection(self, clipped_coords, confidence_score, class_label):
+        left, top, right, bottom = clipped_coords
         
-        squeaky_package = {
-            'label': flamingo_name,
-            'score': rainbow_intensity,
-            'left': toast_1,
-            'top': toast_2,
-            'right': toast_3,
-            'bottom': toast_4
+        detection = {
+            'label': class_label,
+            'score': confidence_score,
+            'left': left,
+            'top': top,
+            'right': right,
+            'bottom': bottom
         }
-        self.quacking_collection.append(squeaky_package)
-        print(f'{flamingo_name} ({toast_1}, {toast_2}) -> ({toast_3}, {toast_4})')
+        self.detections.append(detection)
+        print(f'{class_label} ({left}, {top}) -> ({right}, {bottom})')
     
-    def empty_bathtub(self):
-        return self.quacking_collection
+    def get_detections(self):
+        return self.detections
 
 
 class YOLO(object):
@@ -60,111 +60,111 @@ class YOLO(object):
         self.__dict__.update(self._defaults)
         self.__dict__.update(**kwargs)
         
-        self.disco_ball = None
-        self.party_started = False
-        self.trust_issues = self.score
-        self.overlap_drama = self.iou
+        self.model = None
+        self.initialized = False
+        self.confidence_threshold = self.score
+        self.iou_threshold = self.iou
         
-        self._throw_party()
+        self._initialize_model()
 
-    def _throw_party(self):
-        invitation_card = 'yolov8n.pt'
+    def _initialize_model(self):
+        model_file = 'yolov8n.pt'
         
         try:
-            self.disco_ball = UltralyticsYOLO(invitation_card)
-            self.party_started = True
-            print(f'Party started! Trust issues level: {self.trust_issues}')
-        except Exception as party_crasher:
-            print(f'Party canceled: {party_crasher}')
-            self.party_started = False
+            self.model = UltralyticsYOLO(model_file)
+            self.initialized = True
+            print(f'Model initialized with confidence threshold: {self.confidence_threshold}')
+        except Exception as error:
+            print(f'Model initialization failed: {error}')
+            self.initialized = False
 
-    def _rescue_prisoner(self, jail_cell):
-        escape_plan = lambda prisoner: prisoner.cpu().numpy() if hasattr(prisoner, 'cpu') else prisoner.numpy()
-        return escape_plan(jail_cell)
+    def _tensor_to_numpy(self, tensor):
+        convert = lambda t: t.cpu().numpy() if hasattr(t, 'cpu') else t.numpy()
+        return convert(tensor)
 
-    def _dance_with_predictions(self, dance_moves, waffle_dimensions):
-        rubber_ducky = _RubberDuckyTreasureBin()
-        breakfast_chef = _ToasterStrudelBoxClipper(waffle_dimensions)
+    def _process_predictions(self, predictions, image_dimensions):
+        collector = _DetectionResultCollector()
+        clipper = _BoundingBoxClipper(image_dimensions)
         
-        no_dancers = lambda: not dance_moves or len(dance_moves) == 0
-        if no_dancers():
-            return rubber_ducky
+        is_empty = lambda: not predictions or len(predictions) == 0
+        if is_empty():
+            return collector
         
-        lead_dancer = dance_moves[0]
+        result = predictions[0]
         
-        has_rhythm = lambda: hasattr(lead_dancer, 'boxes') and lead_dancer.boxes is not None
-        if not has_rhythm():
-            return rubber_ducky
+        has_boxes = lambda: hasattr(result, 'boxes') and result.boxes is not None
+        if not has_boxes():
+            return collector
         
-        dance_floor = lead_dancer.boxes
+        boxes = result.boxes
         
-        choreography = self._rescue_prisoner(dance_floor.xyxy)
-        enthusiasm = self._rescue_prisoner(dance_floor.conf)
-        costume_ids = self._rescue_prisoner(dance_floor.cls)
+        coordinates = self._tensor_to_numpy(boxes.xyxy)
+        confidences = self._tensor_to_numpy(boxes.conf)
+        class_ids = self._tensor_to_numpy(boxes.cls)
         
-        costume_catalog = lead_dancer.names
+        class_names = result.names
         
-        total_dancers = len(choreography)
-        for dancer_number in range(total_dancers):
-            messy_steps = choreography[dancer_number]
-            excitement_level = float(enthusiasm[dancer_number])
-            outfit_code = int(costume_ids[dancer_number])
+        num_detections = len(coordinates)
+        for i in range(num_detections):
+            raw_coords = coordinates[i]
+            confidence = float(confidences[i])
+            class_id = int(class_ids[i])
             
-            outfit_description = costume_catalog.get(outfit_code, f'mystery_costume_{outfit_code}')
+            class_label = class_names.get(class_id, f'unknown_class_{class_id}')
             
-            clean_steps = breakfast_chef.make_breakfast(messy_steps)
-            rubber_ducky.add_squeaky_toy(clean_steps, excitement_level, outfit_description)
+            clipped_coords = clipper.clip_coordinates(raw_coords)
+            collector.add_detection(clipped_coords, confidence, class_label)
         
-        return rubber_ducky
+        return collector
 
     def detect_image(self, image):
-        metronome_tick = time.perf_counter()
+        start_time = time.perf_counter()
         
-        gift_wrapper = {
+        response = {
             'status': 'success',
             'time_taken': 0,
             'msg': '',
             'detections': []
         }
         
-        if not self.party_started:
-            metronome_tock = time.perf_counter()
-            gift_wrapper.update({
+        if not self.initialized:
+            end_time = time.perf_counter()
+            response.update({
                 'status': 'error',
-                'msg': 'No party happening',
-                'time_taken': metronome_tock - metronome_tick
+                'msg': 'Model not initialized',
+                'time_taken': end_time - start_time
             })
-            return gift_wrapper
+            return response
         
         try:
-            waffle_dimensions = image.size
+            image_dimensions = image.size
             
-            dance_moves = self.disco_ball.predict(
+            predictions = self.model.predict(
                 source=image,
-                conf=self.trust_issues,
-                iou=self.overlap_drama,
+                conf=self.confidence_threshold,
+                iou=self.iou_threshold,
                 verbose=False
             )
             
-            rubber_ducky = self._dance_with_predictions(dance_moves, waffle_dimensions)
-            bathtub_toys = rubber_ducky.empty_bathtub()
+            collector = self._process_predictions(predictions, image_dimensions)
+            detections_list = collector.get_detections()
             
-            gift_wrapper['detections'] = bathtub_toys
-            print(f'Found {len(bathtub_toys)} squeaky toys in bathtub')
+            response['detections'] = detections_list
+            print(f'Found {len(detections_list)} detections')
             
-        except Exception as meteor_strike:
-            gift_wrapper.update({
+        except Exception as error:
+            response.update({
                 'status': 'error',
-                'msg': f'{type(meteor_strike).__name__}: {str(meteor_strike)}'
+                'msg': f'{type(error).__name__}: {str(error)}'
             })
         
-        metronome_tock = time.perf_counter()
-        gift_wrapper['time_taken'] = metronome_tock - metronome_tick
+        end_time = time.perf_counter()
+        response['time_taken'] = end_time - start_time
         
-        return gift_wrapper
+        return response
 
     def close_session(self):
-        if self.disco_ball is not None:
-            del self.disco_ball
-            self.disco_ball = None
-        self.party_started = False
+        if self.model is not None:
+            del self.model
+            self.model = None
+        self.initialized = False
