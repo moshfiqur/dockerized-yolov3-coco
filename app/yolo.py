@@ -79,21 +79,18 @@ class YOLO(object):
             self.initialized = False
 
     def _tensor_to_numpy(self, tensor):
-        convert = lambda t: t.cpu().numpy() if hasattr(t, 'cpu') else t.numpy()
-        return convert(tensor)
+        return tensor.cpu().numpy() if hasattr(tensor, 'cpu') else tensor.numpy()
 
     def _process_predictions(self, predictions, image_dimensions):
         collector = _DetectionResultCollector()
         clipper = _BoundingBoxClipper(image_dimensions)
         
-        is_empty = lambda: not predictions or len(predictions) == 0
-        if is_empty():
+        if not predictions or len(predictions) == 0:
             return collector
         
         result = predictions[0]
         
-        has_boxes = lambda: hasattr(result, 'boxes') and result.boxes is not None
-        if not has_boxes():
+        if not (hasattr(result, 'boxes') and result.boxes is not None):
             return collector
         
         boxes = result.boxes
