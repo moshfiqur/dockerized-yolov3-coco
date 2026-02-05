@@ -1,11 +1,14 @@
-## Object detection using YOLO v3 in Docker
-A dockerized implementation of YOLO v3 object detection running on gunicorn. The prediction code was directly inspired/modified by [qqwweee/keras-yolo3][1].
-
-[1]: https://github.com/qqwweee/keras-yolo3
+## Dockerized YOLO Object Recognition Service
+Containerized YOLO detection service with gunicorn. Upgraded to Ultralytics YOLOv8 architecture using Python 3.11 for enhanced speed and precision.
 
 
 
-### Build command
+### System Requirements
+
+- Docker engine (version 20.10+)
+- Optional: Pre-trained model weights (auto-fetches YOLOv8n if absent)
+
+### Build Instructions
 ```
 $ docker build -t yolov3-coco .
 ```
