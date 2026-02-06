@@ -1,195 +1,167 @@
-import colorsys
 import os
-from timeit import default_timer as timer
-
-import numpy as np
-from keras import backend as K
-from keras.models import load_model
-from keras.layers import Input
-from PIL import Image, ImageFont, ImageDraw
-
-from yolo3.model import yolo_eval, yolo_body, tiny_yolo_body
-from yolo3.utils import letterbox_image
 import sys
-from keras.utils import multi_gpu_model
+import time
+from ultralytics import YOLO as UltralyticsYOLO
+import numpy as np
+from PIL import Image
+
+
+class _BoundingBoxClipper:
+    def __init__(self, image_dimensions):
+        self.width, self.height = image_dimensions
+    
+    def clip_coordinates(self, box_coords):
+        x1, y1, x2, y2 = box_coords
+        clipped_x1 = int(np.clip(x1, 0, self.width))
+        clipped_y1 = int(np.clip(y1, 0, self.height))
+        clipped_x2 = int(np.clip(x2, 0, self.width))
+        clipped_y2 = int(np.clip(y2, 0, self.height))
+        return clipped_x1, clipped_y1, clipped_x2, clipped_y2
+
+
+class _DetectionResultCollector:
+    def __init__(self):
+        self.detections = []
+    
+    def add_detection(self, clipped_coords, confidence_score, class_label):
+        left, top, right, bottom = clipped_coords
+        
+        detection = {
+            'label': class_label,
+            'score': confidence_score,
+            'left': left,
+            'top': top,
+            'right': right,
+            'bottom': bottom
+        }
+        self.detections.append(detection)
+        print(f'{class_label} ({left}, {top}) -> ({right}, {bottom})')
+    
+    def get_detections(self):
+        return self.detections
+
 
 class YOLO(object):
     _defaults = {
         "model_path": 'model_data/yolo_weights.h5',
         "anchors_path": 'model_data/yolo_anchors.txt',
         "classes_path": 'model_data/coco_classes.txt',
-        "score" : 0.3,
-        "iou" : 0.45,
-        "model_image_size" : (416, 416),
-        "gpu_num" : 1,
+        "score": 0.3,
+        "iou": 0.45,
+        "model_image_size": (416, 416),
+        "gpu_num": 1,
     }
 
     @classmethod
     def get_defaults(cls, n):
-        if n in cls._defaults:
-            return cls._defaults[n]
-        else:
-            return "Unrecognized attribute name '" + n + "'"
+        return cls._defaults.get(n, f"Unrecognized attribute name '{n}'")
 
     def __init__(self, **kwargs):
-        self.__dict__.update(self._defaults) # set up default values
-        self.__dict__.update(**kwargs) # and update with user overrides
-        self.class_names = self._get_class()
-        self.anchors = self._get_anchors()
-        self.sess = K.get_session()
-        self.boxes, self.scores, self.classes = self.generate()
+        self.__dict__.update(self._defaults)
+        self.__dict__.update(**kwargs)
+        
+        self.model = None
+        self.initialized = False
+        self.confidence_threshold = self.score
+        self.iou_threshold = self.iou
+        
+        self._initialize_model()
 
-    def _get_class(self):
-        classes_path = os.path.expanduser(self.classes_path)
-        with open(classes_path) as f:
-            class_names = f.readlines()
-        class_names = [c.strip() for c in class_names]
-        return class_names
-
-    def _get_anchors(self):
-        anchors_path = os.path.expanduser(self.anchors_path)
-        with open(anchors_path) as f:
-            anchors = f.readline()
-        anchors = [float(x) for x in anchors.split(',')]
-        return np.array(anchors).reshape(-1, 2)
-
-    def generate(self):
-        model_path = os.path.expanduser(self.model_path)
-        assert model_path.endswith('.h5'), 'Keras model or weights must be a .h5 file.'
-
-        # Load model, or construct model and load weights.
-        num_anchors = len(self.anchors)
-        num_classes = len(self.class_names)
-        is_tiny_version = num_anchors==6 # default setting
+    def _initialize_model(self):
+        model_file = 'yolov8n.pt'
+        
         try:
-            self.yolo_model = load_model(model_path, compile=False)
-        except:
-            self.yolo_model = tiny_yolo_body(Input(shape=(None,None,3)), num_anchors//2, num_classes) \
-                if is_tiny_version else yolo_body(Input(shape=(None,None,3)), num_anchors//3, num_classes)
-            self.yolo_model.load_weights(self.model_path) # make sure model, anchors and classes match
-        else:
-            assert self.yolo_model.layers[-1].output_shape[-1] == \
-                num_anchors/len(self.yolo_model.output) * (num_classes + 5), \
-                'Mismatch between model and given anchor and class sizes'
+            self.model = UltralyticsYOLO(model_file)
+            self.initialized = True
+            print(f'Model initialized with confidence threshold: {self.confidence_threshold}')
+        except Exception as error:
+            print(f'Model initialization failed: {error}')
+            self.initialized = False
 
-        print('{} model, anchors, and classes loaded.'.format(model_path))
+    def _tensor_to_numpy(self, tensor):
+        return tensor.cpu().numpy() if hasattr(tensor, 'cpu') else tensor.numpy()
 
-        # Generate output tensor targets for filtered bounding boxes.
-        self.input_image_shape = K.placeholder(shape=(2, ))
-        if self.gpu_num >= 2:
-            self.yolo_model = multi_gpu_model(self.yolo_model, gpus=self.gpu_num)
-        boxes, scores, classes = yolo_eval(self.yolo_model.output, self.anchors,
-                len(self.class_names), self.input_image_shape,
-                score_threshold=self.score, iou_threshold=self.iou)
-        return boxes, scores, classes
+    def _process_predictions(self, predictions, image_dimensions):
+        collector = _DetectionResultCollector()
+        clipper = _BoundingBoxClipper(image_dimensions)
+        
+        if not predictions or len(predictions) == 0:
+            return collector
+        
+        result = predictions[0]
+        
+        if not (hasattr(result, 'boxes') and result.boxes is not None):
+            return collector
+        
+        boxes = result.boxes
+        
+        coordinates = self._tensor_to_numpy(boxes.xyxy)
+        confidences = self._tensor_to_numpy(boxes.conf)
+        class_ids = self._tensor_to_numpy(boxes.cls)
+        
+        class_names = result.names
+        
+        num_detections = len(coordinates)
+        for i in range(num_detections):
+            raw_coords = coordinates[i]
+            confidence = float(confidences[i])
+            class_id = int(class_ids[i])
+            
+            class_label = class_names.get(class_id, f'unknown_class_{class_id}')
+            
+            clipped_coords = clipper.clip_coordinates(raw_coords)
+            collector.add_detection(clipped_coords, confidence, class_label)
+        
+        return collector
 
     def detect_image(self, image):
-        start = timer()
-        detections = []
-        detection_result = {
+        start_time = time.perf_counter()
+        
+        response = {
             'status': 'success',
             'time_taken': 0,
-            'msg': ''
+            'msg': '',
+            'detections': []
         }
-
+        
+        if not self.initialized:
+            end_time = time.perf_counter()
+            response.update({
+                'status': 'error',
+                'msg': 'Model not initialized',
+                'time_taken': end_time - start_time
+            })
+            return response
+        
         try:
-            if self.model_image_size != (None, None):
-                assert self.model_image_size[0]%32 == 0, 'Multiples of 32 required'
-                assert self.model_image_size[1]%32 == 0, 'Multiples of 32 required'
-                boxed_image = letterbox_image(image, tuple(reversed(self.model_image_size)))
-            else:
-                new_image_size = (image.width - (image.width % 32),
-                                image.height - (image.height % 32))
-                boxed_image = letterbox_image(image, new_image_size)
-            image_data = np.array(boxed_image, dtype='float32')
-
-            image_data /= 255.
-            image_data = np.expand_dims(image_data, 0)  # Add batch dimension.
-
-            out_boxes, out_scores, out_classes = self.sess.run(
-                [self.boxes, self.scores, self.classes],
-                feed_dict={
-                    self.yolo_model.input: image_data,
-                    self.input_image_shape: [image.size[1], image.size[0]],
-                    K.learning_phase(): 0
-                })
-
-            print('Found {} boxes for {}'.format(len(out_boxes), 'img'))
-
-            if len(out_boxes) > 0:
-                for i, c in reversed(list(enumerate(out_classes))):
-                    predicted_class = self.class_names[c]
-                    box = out_boxes[i]
-                    score = out_scores[i]
-
-                    top, left, bottom, right = box
-                    top = max(0, np.floor(top + 0.5).astype('int32'))
-                    left = max(0, np.floor(left + 0.5).astype('int32'))
-                    bottom = min(image.size[1], np.floor(bottom + 0.5).astype('int32'))
-                    right = min(image.size[0], np.floor(right + 0.5).astype('int32'))
-                    detection_dict = {
-                        'label': predicted_class,
-                        'score': float(score),
-                        'left': int(left),
-                        'top': int(top),
-                        'right': int(right),
-                        'bottom': int(bottom)
-                    }
-                    detections.append(detection_dict)
-                    print(predicted_class, (left, top), (right, bottom))
+            image_dimensions = image.size
             
-            detection_result['detections'] = detections
-        except Exception:
-            exc_type, value, traceback = sys.exc_info()
-            detection_result['status'] = 'error'
-            detection_result['msg'] = '{}: {}'.format(exc_type.__name__, str(value))
-            detection_result['detections'] = detections
-
-        end = timer()
-        detection_result['time_taken'] = end - start
-        return detection_result
+            predictions = self.model.predict(
+                source=image,
+                conf=self.confidence_threshold,
+                iou=self.iou_threshold,
+                verbose=False
+            )
+            
+            collector = self._process_predictions(predictions, image_dimensions)
+            detections_list = collector.get_detections()
+            
+            response['detections'] = detections_list
+            print(f'Found {len(detections_list)} detections')
+            
+        except Exception as error:
+            response.update({
+                'status': 'error',
+                'msg': f'{type(error).__name__}: {str(error)}'
+            })
+        
+        end_time = time.perf_counter()
+        response['time_taken'] = end_time - start_time
+        
+        return response
 
     def close_session(self):
-        self.sess.close()
-
-def detect_video(yolo, video_path, output_path=""):
-    import cv2
-    vid = cv2.VideoCapture(video_path)
-    if not vid.isOpened():
-        raise IOError("Couldn't open webcam or video")
-    video_FourCC    = int(vid.get(cv2.CAP_PROP_FOURCC))
-    video_fps       = vid.get(cv2.CAP_PROP_FPS)
-    video_size      = (int(vid.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                        int(vid.get(cv2.CAP_PROP_FRAME_HEIGHT)))
-    isOutput = True if output_path != "" else False
-    if isOutput:
-        print("!!! TYPE:", type(output_path), type(video_FourCC), type(video_fps), type(video_size))
-        out = cv2.VideoWriter(output_path, video_FourCC, video_fps, video_size)
-    accum_time = 0
-    curr_fps = 0
-    fps = "FPS: ??"
-    prev_time = timer()
-    while True:
-        return_value, frame = vid.read()
-        image = Image.fromarray(frame)
-        image = yolo.detect_image(image)
-        result = np.asarray(image)
-        curr_time = timer()
-        exec_time = curr_time - prev_time
-        prev_time = curr_time
-        accum_time = accum_time + exec_time
-        curr_fps = curr_fps + 1
-        if accum_time > 1:
-            accum_time = accum_time - 1
-            fps = "FPS: " + str(curr_fps)
-            curr_fps = 0
-        cv2.putText(result, text=fps, org=(3, 15), fontFace=cv2.FONT_HERSHEY_SIMPLEX,
-                    fontScale=0.50, color=(255, 0, 0), thickness=2)
-        cv2.namedWindow("result", cv2.WINDOW_NORMAL)
-        cv2.imshow("result", result)
-        if isOutput:
-            out.write(result)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-    yolo.close_session()
-
+        if self.model is not None:
+            del self.model
+            self.model = None
+        self.initialized = False
