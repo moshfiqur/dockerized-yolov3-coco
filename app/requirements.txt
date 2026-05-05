@@ -1,5 +1,6 @@
-ultralytics==8.4.12
-gunicorn==23.0.0
-Pillow==11.1.0
-numpy==2.2.2
-opencv-python-headless==4.10.0.84
+ultralytics==8.4.46
+gunicorn==26.0.0
+Pillow==12.2.0
+numpy==2.4.4
+opencv-python-headless==4.13.0.92
+python-multipart==0.0.27

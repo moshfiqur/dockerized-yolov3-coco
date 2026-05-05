@@ -1,18 +1,34 @@
-import gunicorn
 import json
-import cgi
 import sys
 import predict
+from multipart import create_form_parser
 
 def app(environ, start_response):
     try:
         request_size = int(environ.get('CONTENT_LENGTH', 0))
         if request_size == 0:
             raise ValueError('Zero sized request received')
-        
-        form = cgi.FieldStorage(fp=environ['wsgi.input'], environ=environ)
-        f = form['file'].file
-        image = f.read()
+
+        files = {}
+
+        def on_file(file):
+            key = file.field_name.decode() if isinstance(file.field_name, bytes) else file.field_name
+            if key is not None:
+                files[key] = file
+
+        content_type = environ.get('CONTENT_TYPE', '')
+        parser = create_form_parser(
+            {'Content-Type': content_type, 'Content-Length': str(request_size)},
+            lambda field: None,
+            on_file,
+        )
+        parser.write(environ['wsgi.input'].read(request_size))
+        parser.finalize()
+
+        if 'file' not in files:
+            raise ValueError('No file field found in request')
+
+        image = files['file'].file_object.read()
         
         prediction = predict.predict(image)
 
