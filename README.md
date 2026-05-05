@@ -1,12 +1,11 @@
 ## Dockerized YOLO Object Recognition Service
-Containerized YOLO detection service with gunicorn. Upgraded to Ultralytics YOLOv8 architecture using Python 3.11 for enhanced speed and precision.
+Containerized YOLO detection service with gunicorn. Uses Ultralytics YOLOv8 architecture on Python 3.13. The model weights are downloaded automatically on first run.
 
 
 
 ### System Requirements
 
 - Docker engine (version 20.10+)
-- Optional: Pre-trained model weights (auto-fetches YOLOv8n if absent)
 
 ### Build Instructions
 ```
@@ -17,15 +16,12 @@ $ docker build -t yolov3-coco .
 
 Run with interactive shell access to container
 ```
-$ docker run -it \
-    -v /srv/downloads/ml-datasets/pretrained-models/yolov3-coco:/usr/src/app/yolov3-coco:ro \
-    yolov3-coco bash
+$ docker run -it -p 10080:10080 yolov3-coco bash
 ```
 
 Run to test the app in action. We needed to increase the memory limit using `-m 2g` for the object detection model to work.
 ```
 $ docker run \
-    -v /srv/downloads/ml-datasets/pretrained-models/yolov3-coco:/usr/src/app/yolov3-coco:ro \
     -p 10080:10080 \
     -m 4g yolov3-coco
 ```

@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 LABEL maintainer="Moshfiqur Rahman <rahman.moshfiqur@gmail.com>"
 LABEL description="Modern YOLO object detection service"
